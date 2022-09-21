@@ -1,0 +1,200 @@
+Resources:
+    NewVPC:
+        Type: 'AWS::EC2::VPC'
+        Properties:
+            CidrBlock: 10.100.0.0/16
+            EnableDnsSupport: true
+            EnableDnsHostnames: true
+            Tags:
+            - Key: Name
+              Value: !Sub ${AWS::StackName}-VPC
+    
+    NewInternetGateway:
+        Type: AWS::EC2::InternetGateway
+        DependsOn: NewVPC
+    
+    NewAttachGateway:
+        Type: AWS::EC2::VPCGatewayAttachment
+        Properties:
+            VpcId: !Ref NewVPC
+            InternetGatewayId: !Ref NewInternetGateway
+
+    NewSubnet1:
+        Type: AWS::EC2::Subnet
+        Properties:
+            CidrBlock: 10.100.1.0/24
+            VpcId: !Ref NewVPC
+            AvailabilityZone: !Select [0, !GetAZs '' ]
+            Tags:
+            - Key: Name
+              Value: !Sub ${AWS::StackName}-Public
+    
+    NewSubnet2:
+        Type: AWS::EC2::Subnet
+        Properties:
+            CidrBlock: 10.100.10.0/24
+            VpcId: !Ref NewVPC
+            AvailabilityZone: !Select [0, !GetAZs '' ]
+            Tags:
+            - Key: Name
+              Value: !Sub ${AWS::StackName}-Private
+    
+    NATGatewayElasticIp:
+        Type: AWS::EC2::EIP
+        Properties:
+            Domain: NewVPC
+    
+    NewNatGateway:
+        Type: AWS::EC2::NatGateway
+        Properties:
+            AllocationId: !GetAtt NATGatewayElasticIp.AllocationId
+            SubnetId: !Ref NewSubnet1
+            Tags:
+            - Key: Name
+              Value: !Sub NAT-${AWS::StackName}
+    
+    PrivateRouteTable:
+        Type: AWS::EC2::RouteTable
+        Properties:
+            VpcId: !Ref NewVPC
+            Tags:
+            - Key: Name
+              Value: Private
+    
+    PrivateRoute1:
+        Type: AWS::EC2::Route
+        Properties:
+            RouteTableId: !Ref PrivateRouteTable
+            DestinationCidrBlock: 0.0.0.0/0
+            GatewayId: !Ref NewNatGateway
+    
+    PublicRouteTable:
+        Type: AWS::EC2::RouteTable
+        Properties:
+            VpcId: !Ref NewVPC
+            Tags:
+            - Key: Name
+              Value: Public
+    
+    PublicRoute1:
+        Type: AWS::EC2::Route
+        Properties:
+            RouteTableId: !Ref PublicRouteTable
+            DestinationCidrBlock: 0.0.0.0/0
+            GatewayId: !Ref NewInternetGateway
+    
+    PublicRouteTableAssociation:
+        Type: AWS::EC2::SubnetRouteTableAssociation
+        Properties:
+            RouteTableId: !Ref PublicRouteTable
+            SubnetId: !Ref NewSubnet1
+    
+    PrivateRouteTableAssociation:
+        Type: AWS::EC2::SubnetRouteTableAssociation
+        Properties:
+            RouteTableId: !Ref PrivateRouteTable
+            SubnetId: !Ref NewSubnet2
+    
+    NewWebSecGroup:
+        Type: AWS::EC2::SecurityGroup
+        Properties:
+            GroupName: Webservers
+            GroupDescription: Sec Group for the Web Servers
+            VpcId: !Ref NewVPC
+            SecurityGroupIngress:
+            -
+              IpProtocol: tcp
+              FromPort: 22
+              ToPort: 22
+              CidrIp: 0.0.0.0/0
+            -
+              IpProtocol: tcp
+              FromPort: 80
+              ToPort: 80
+              CidrIp: 0.0.0.0/0
+            -
+              IpProtocol: tcp
+              FromPort: 443
+              ToPort: 443
+              CidrIp: 0.0.0.0/0
+
+    NewDBSecGroup:
+        Type: AWS::EC2::SecurityGroup
+        Properties:
+            GroupName: Databases
+            GroupDescription: Sec Group for the Databases
+            VpcId: !Ref NewVPC
+            SecurityGroupIngress:
+            -
+              IpProtocol: tcp
+              FromPort: 22
+              ToPort: 22
+              CidrIp: 0.0.0.0/0
+            -
+              IpProtocol: tcp
+              FromPort: 3306
+              ToPort: 3306
+              CidrIp: 0.0.0.0/0
+    
+    DBVolume:
+        Type: AWS::EC2::Volume
+        DeletionPolicy: Snapshot
+        Properties:
+            AvailabilityZone: !Select [0, !GetAZs '' ]
+            Size: 64
+            Tags:
+            - Key: Name
+              Value: data-volume
+            VolumeType: gp2
+
+    NewDBInstance:
+        Type: AWS::EC2::Instance
+        Properties:
+            BlockDeviceMappings:
+            -
+              DeviceName: "/dev/sda1"
+              Ebs:
+                VolumeSize: 24
+                VolumeType: gp2
+            InstanceType: t2.micro
+            ImageId: ami-05fa00d4c63e32376 
+            KeyName: key
+            Monitoring: true
+            SecurityGroupIds:
+            - !Ref NewDBSecGroup
+            SubnetId: !Ref NewSubnet2
+            Tags:
+            - Key: Name
+              Value: !Sub ${AWS::StackName}-DB
+            Volumes:
+            -
+              Device: "/dev/sdc"
+              VolumeId: !Ref DBVolume
+    
+    NewElasticIp:
+        Type: AWS::EC2::EIP
+        Properties:
+            InstanceId: !Ref NewWEBInstance
+            Domain: NewVPC
+    
+    NewWEBInstance:
+        Type: AWS::EC2::Instance
+        Properties:
+            BlockDeviceMappings:
+            -
+              DeviceName: "/dev/sda1"
+              Ebs:
+                VolumeSize: 24
+                VolumeType: gp2
+            InstanceType: t2.micro
+            ImageId: ami-05fa00d4c63e32376 
+            KeyName: key
+            Monitoring: true
+            SecurityGroupIds:
+            - !Ref NewWebSecGroup
+            SubnetId: !Ref NewSubnet1
+            Tags:
+            - Key: Name
+              Value: !Sub ${AWS::StackName}-WEB
+
+            
